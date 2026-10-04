@@ -375,12 +375,13 @@ const coinMult = () => (1 + 0.1 * up('coins')) * DIFF[save.diff].coins;
 // ---------- canvas ----------
 const stage = $('stage'), canvas = $('game'), ctx = canvas.getContext('2d');
 let K = 1, bg = null, lastScale = 0;
+let quality = 1; // lowered automatically on slow devices (see frame)
 function resize() {
   // measure the body, not the window: inside the claude.ai viewer the root is padded by the phone's safe areas
   const vw = document.body.clientWidth || window.innerWidth, vh = document.body.clientHeight || window.innerHeight;
   if (vw < 40 || vh < 40) return; // not laid out yet - the ResizeObserver below calls again
   const s = Math.max(0.2, Math.min((vw - 32) / W, (vh - 16) / H));
-  const k = Math.min(s * (window.devicePixelRatio || 1), 2.6);
+  const k = Math.max(0.75, Math.min(s * (window.devicePixelRatio || 1), 2.6) * quality);
   if (s === lastScale && k === K) return;
   lastScale = s;
   stage.style.transform = `translate(-50%,-50%) scale(${s})`;
@@ -2023,10 +2024,14 @@ setupLevel(level);
 refreshMenu();
 updateSoundBtn();
 
-let last = performance.now();
+let last = performance.now(), slowFor = 0;
 function frame(now) {
-  const dt = clamp((now - last) / 1000, 0, 0.05);
+  const raw = (now - last) / 1000;
+  const dt = clamp(raw, 0, 0.05);
   last = now;
+  // slow device: if frames keep taking over ~30ms, draw fewer pixels (it never goes back up)
+  if (time > 2 && raw > 0.03 && raw < 0.3) slowFor += raw; else if (raw < 0.022) slowFor = Math.max(0, slowFor - raw * 0.5);
+  if (slowFor > 1.5 && quality > 0.8) { quality = 0.75; slowFor = 0; resize(); } // one mild step only, so it never turns blurry
   if (state === 'playing' || state === 'ending') update(dt);
   else if (state !== 'paused') idle(dt);
   render();
