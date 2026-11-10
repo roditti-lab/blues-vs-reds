@@ -32,6 +32,11 @@ button{-webkit-appearance:none;appearance:none}
 #game{position:absolute;left:0;top:0;width:540px;height:960px;display:block;touch-action:none;cursor:crosshair}
 #lvlBtn{position:absolute;top:12px;left:50%;transform:translateX(-50%);height:34px;padding:0 14px;border-radius:999px;border:2px solid rgba(255,255,255,.3);background:rgba(45,22,10,.55);color:#fff;font:800 16px 'Rubik',sans-serif;display:flex;align-items:center;gap:8px;cursor:pointer;z-index:2}
 #lvlBtn svg{width:13px;height:13px;flex:none}
+#shopHud{position:absolute;top:10px;right:128px;width:60px;height:38px;padding:0;border-radius:999px;border:2px solid rgba(255,255,255,.6);background:var(--green);box-shadow:0 3px 0 var(--green-dark);font-size:21px;line-height:1;display:none;align-items:center;justify-content:center;cursor:pointer;z-index:2}
+#shopHud::before{content:'';position:absolute;inset:-8px -4px}
+#shopHud:active{transform:translateY(2px);box-shadow:0 1px 0 var(--green-dark)}
+#shopHud .dot{position:absolute;top:-5px;left:-5px;width:15px;height:15px;border-radius:50%;background:var(--gold);border:2px solid #fff;display:none}
+#shopHud.can .dot{display:block}
 .power{position:absolute;right:6px;width:62px;height:62px;border-radius:50%;border:3px solid #fff;display:none;align-items:center;justify-content:center;font-size:30px;line-height:1;cursor:pointer;z-index:3;padding:0}
 .power:active{transform:translateY(3px)}
 .power .cnt{position:absolute;bottom:-6px;left:-6px;min-width:24px;height:24px;border-radius:12px;background:#2b1408;color:#fff;font:900 14px/20px 'Rubik',sans-serif;text-align:center;border:2px solid #fff}
@@ -123,6 +128,7 @@ h2 i{width:14px;height:14px;border-radius:50%;display:inline-block}
 <div id="stage" dir="rtl" lang="he">
   <canvas id="game"></canvas>
   <button id="lvlBtn" type="button" aria-label="הפסקה"><svg viewBox="0 0 14 14" aria-hidden="true"><rect x="2" y="1" width="3.5" height="12" rx="1" fill="#fff"/><rect x="8.5" y="1" width="3.5" height="12" rx="1" fill="#fff"/></svg><span id="lvlTxt">שלב 1</span></button>
+  <button id="shopHud" type="button" aria-label="חנות"><span aria-hidden="true">🛒</span><i class="dot"></i></button>
   <button id="freezeBtn" class="power" type="button" aria-label="הקפאה"><span aria-hidden="true">❄️</span><span class="cnt" id="freezeCount">0</span></button>
   <button id="bombBtn" class="power" type="button" aria-label="פצצה"><span aria-hidden="true">💣</span><span class="cnt" id="bombCount">0</span></button>
   <div id="setupTip"><span>גררו את התותחים והחומות למקום שאתם רוצים</span></div>
@@ -154,7 +160,10 @@ h2 i{width:14px;height:14px;border-radius:50%;display:inline-block}
   <div id="pause" class="overlay">
     <div class="panel small">
       <div class="result plain">הפסקה</div>
-      <div class="btns"><button class="big green" id="resumeBtn" type="button">להמשיך</button></div>
+      <div class="btns">
+        <button class="big green" id="resumeBtn" type="button">להמשיך</button>
+        <button class="big blue" id="shopBtn4" type="button">🛒 חנות</button>
+      </div>
       <button class="link" id="soundBtn" type="button">צלילים: פועלים</button>
       <button class="link" id="menuBtn1" type="button">לתפריט הדמויות</button>
     </div>
@@ -757,6 +766,7 @@ let firing = false, fireTimer = 0, keyL = false, keyR = false, keyF = false;
 let baseHp = 20, baseMax = 20, charge = 0, shake = 0, hurt = 0, time = 0;
 let levelCoins = 0, coinFrac = 0, endTimer = 0, endResult = '', hintT = 0, shots = 0;
 let freezeT = 0, freezeFlash = 0, drag = null, starCount = starTotal();
+let midPlace = false, boughtNew = 0; // placing a cannon or wall bought in the middle of a battle
 let nextId = 1, blueCount = 0, redCount = 0;
 const grid = Array.from({ length: GCOLS * GROWS }, () => []);
 
@@ -784,7 +794,7 @@ function setupLevel(n) {
   });
   baseMax = baseHp = d.base + 5 * up('hearts');
   charge = 0; shake = 0; hurt = 0; levelCoins = 0; shots = 0; fireTimer = 0; firing = false;
-  freezeT = 0; freezeFlash = 0; drag = null;
+  freezeT = 0; freezeFlash = 0; drag = null; midPlace = false; boughtNew = 0;
   cannon.x = cannon.tx = W / 2; cannon.recoil = 0; cannon.flash = 0;
   hintT = 7;
   placeDefenses(n);
@@ -793,25 +803,28 @@ function setupLevel(n) {
 }
 
 // ---------- defenses the player places (positions remembered per layout) ----------
+const savedPos = (arr, i) => (Array.isArray(arr) && Array.isArray(arr[i]) && isFinite(arr[i][0]) && isFinite(arr[i][1])) ? arr[i] : null;
+const savedPlace = n => save.place[(n - 1) % LAYOUTS.length] || {};
 function placeDefenses(n) {
-  const li = (n - 1) % LAYOUTS.length, L = LAYOUTS[li];
-  const saved = save.place[li] || {};
-  const pos = (arr, i) => (Array.isArray(arr) && Array.isArray(arr[i]) && isFinite(arr[i][0]) && isFinite(arr[i][1])) ? arr[i] : null;
   turrets = []; defWalls = [];
-  for (let i = 0; i < up('turret'); i++) {
-    const p = pos(saved.t, i) || L.pads[i];
-    const t = { x: p[0], y: p[1], timer: 0.5 + i * 0.3, recoil: 0, flash: 0 };
-    turrets.push(t);
-    if (!spotOk('t', t, t.x, t.y)) { t.x = L.pads[i][0]; t.y = L.pads[i][1]; if (!spotOk('t', t, t.x, t.y)) findFreeSpot('t', t); }
-  }
-  const wc = up('wall') ? wallCount() : 0, hp = wallHpMax();
-  for (let i = 0; i < wc; i++) {
-    const def = WALL_SPOTS[wc - 1][i];
-    const p = pos(saved.w, i) || def;
-    const w = { x: p[0], y: p[1], w: WALL_W, hp, maxHp: hp, hit: 0 };
-    defWalls.push(w);
-    if (!spotOk('w', w, w.x, w.y)) { w.x = def[0]; w.y = def[1]; if (!spotOk('w', w, w.x, w.y)) findFreeSpot('w', w); }
-  }
+  for (let i = 0; i < up('turret'); i++) addTurret(n);
+  const wc = up('wall') ? wallCount() : 0;
+  for (let i = 0; i < wc; i++) addWall(n, wc);
+}
+// the next cannon / wall goes where the player last put it on this layout, else on its default spot
+function addTurret(n) {
+  const i = turrets.length, pad = LAYOUTS[(n - 1) % LAYOUTS.length].pads[i];
+  const p = savedPos(savedPlace(n).t, i) || pad;
+  const t = { x: p[0], y: p[1], timer: 0.5 + i * 0.3, recoil: 0, flash: 0 };
+  turrets.push(t);
+  if (!spotOk('t', t, t.x, t.y)) { t.x = pad[0]; t.y = pad[1]; if (!spotOk('t', t, t.x, t.y)) findFreeSpot('t', t); }
+}
+function addWall(n, wc) {
+  const i = defWalls.length, def = WALL_SPOTS[wc - 1][i], hp = wallHpMax();
+  const p = savedPos(savedPlace(n).w, i) || def;
+  const w = { x: p[0], y: p[1], w: WALL_W, hp, maxHp: hp, hit: 0 };
+  defWalls.push(w);
+  if (!spotOk('w', w, w.x, w.y)) { w.x = def[0]; w.y = def[1]; if (!spotOk('w', w, w.x, w.y)) findFreeSpot('w', w); }
 }
 function spotOk(kind, item, x, y) {
   if (kind === 't') {
@@ -1771,7 +1784,8 @@ function beginBattle(direct) {
   if (!direct && state !== 'setup') return;
   drag = null;
   state = 'playing';
-  addText('שלב ' + level, W / 2, 470, '#ffffff', 54, true, 1.6);
+  if (midPlace) { midPlace = false; addText('ממשיכים!', W / 2, 560, '#ffffff', 46, true, 1.2); }
+  else addText('שלב ' + level, W / 2, 470, '#ffffff', 54, true, 1.6);
   initAudio();
 }
 function openMenu() {
@@ -1782,7 +1796,7 @@ function openMenu() {
   show('menu');
 }
 function togglePause() {
-  if (state === 'playing') { state = 'paused'; firing = false; writeSave(); updateSoundBtn(); show('pause'); }
+  if (state === 'playing') { state = 'paused'; firing = false; writeSave(); updateSoundBtn(); updateShopHints(); show('pause'); }
   else if (state === 'paused') { show(null); state = 'playing'; }
 }
 function showWin() {
@@ -1872,13 +1886,46 @@ function anyAffordable() {
 }
 function updateShopHints() {
   const a = anyAffordable();
-  for (const id of ['shopBtn1', 'shopBtn2', 'shopBtn3']) $(id).classList.toggle('pulse', a);
+  for (const id of ['shopBtn1', 'shopBtn2', 'shopBtn3', 'shopBtn4']) $(id).classList.toggle('pulse', a);
   $('winHint').textContent = a ? 'יש לכם מספיק מטבעות לקנות משהו בחנות!' : '';
 }
-function openShop(from) { shopFrom = from; renderShop(); show('shop'); }
+function openShop(from) {
+  shopFrom = from;
+  $('shopBack').textContent = from === 'battle' ? 'חזרה לקרב' : 'חזרה';
+  renderShop();
+  show('shop');
+}
+// the shop in the middle of a battle: the battle waits while Tom shops
+function openBattleShop() {
+  if (state === 'playing') { state = 'paused'; firing = false; keyF = false; writeSave(); }
+  else if (state !== 'paused') return;
+  boughtNew = 0;
+  openShop('battle');
+}
 function closeShop() {
+  if (shopFrom === 'battle') {
+    show(null);
+    updateShopHints();
+    // a new cannon or wall: drag it into place first, then the battle goes on
+    if (boughtNew) { state = 'setup'; midPlace = true; }
+    else state = 'playing';
+    return;
+  }
   if (shopFrom === 'menu') { setupLevel(save.level); refreshMenu(); } else updateShopHints();
   show(shopFrom);
+}
+// an upgrade bought mid-battle counts right away, also for soldiers already on the field
+function applyInBattle(it) {
+  const blues = units.filter(u => u.alive && u.team === 0);
+  if (it.id === 'hearts') { baseMax += 5; baseHp += 5; }
+  else if (it.id === 'shield') { for (const u of blues) if (u.kind === 'n') { u.hp++; u.maxHp++; } }
+  else if (it.id === 'speed') { const k = speedMul() / (speedMul() - 0.08); for (const u of blues) u.sp *= k; }
+  else if (it.id === 'super') { for (const u of blues) if (u.kind === 'c') { u.hp += 6; u.maxHp += 6; } }
+  else if (it.id === 'turret') { addTurret(level); boughtNew++; }
+  else if (it.id === 'wall') {
+    if (up('wall') <= 3) { addWall(level, wallCount()); boughtNew++; }
+    else for (const w of defWalls) { w.maxHp = wallHpMax(); if (w.hp > 0) w.hp = Math.min(w.maxHp, w.hp + 15); }
+  }
 }
 function renderShop() {
   $('shopCoins').textContent = save.coins;
@@ -1928,6 +1975,7 @@ function buy(it) {
   save.coins -= p;
   if (it.consumable) save[it.key]++;
   else save.up[it.id] = up(it.id) + 1;
+  if (shopFrom === 'battle' && !it.consumable) applyInBattle(it);
   writeSave();
   sfx('buy');
   renderShop();
@@ -1936,11 +1984,14 @@ function buy(it) {
 // buttons that only make sense in battle (or while placing defenses)
 const shown = {};
 function setShown(id, on, disp) { if (shown[id] !== on) { shown[id] = on; $(id).style.display = on ? disp : 'none'; } }
-let lastBombs = -1, lastFreezes = -1;
+let lastBombs = -1, lastFreezes = -1, lastCoins = -1;
 function syncHud() {
   const battle = state === 'playing' || state === 'paused';
   setShown('bombBtn', battle && save.bombs > 0, 'flex');
   setShown('freezeBtn', battle && save.freezes > 0, 'flex');
+  setShown('shopHud', battle, 'flex');
+  // gold dot on the in-battle shop button when something is affordable
+  if (save.coins !== lastCoins) { lastCoins = save.coins; $('shopHud').classList.toggle('can', anyAffordable()); }
   setShown('setupTip', state === 'setup', 'flex');
   setShown('setupBar', state === 'setup', 'flex');
   if (save.bombs !== lastBombs) { lastBombs = save.bombs; $('bombCount').textContent = lastBombs; }
@@ -1984,7 +2035,8 @@ window.addEventListener('keydown', e => {
   }
   else if (c === 'KeyB') useBomb();
   else if (c === 'KeyF') useFreeze();
-  else if (c === 'Escape' || c === 'KeyP') togglePause();
+  else if (c === 'KeyS') { if (state === 'playing') openBattleShop(); }
+  else if (c === 'Escape' || c === 'KeyP') { if ($('shop').classList.contains('show')) closeShop(); else togglePause(); }
   else if (c === 'Enter') {
     if (state === 'setup') beginBattle();
     else if (state === 'menu' && !$('shop').classList.contains('show')) { initAudio(); startLevel(save.level); }
@@ -2016,6 +2068,8 @@ for (const id of ['menuBtn1', 'menuBtn2', 'menuBtn3']) $(id).addEventListener('c
 $('shopBtn1').addEventListener('click', () => openShop('menu'));
 $('shopBtn2').addEventListener('click', () => openShop('win'));
 $('shopBtn3').addEventListener('click', () => openShop('lose'));
+$('shopBtn4').addEventListener('click', openBattleShop);
+$('shopHud').addEventListener('click', () => { initAudio(); openBattleShop(); });
 $('shopBack').addEventListener('click', closeShop);
 $('bombBtn').addEventListener('click', useBomb);
 $('freezeBtn').addEventListener('click', useFreeze);
